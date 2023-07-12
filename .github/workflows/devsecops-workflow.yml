@@ -1,0 +1,119 @@
+name: Simple React Application
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  sonarcloud-scan-job:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js 16
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: SonarCloud Scan
+        uses: sonarsource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.organization=nishanthkumarpathi
+            -Dsonar.projectKey=nishanthkumarpathi_simple-reactapp-track3
+            -Dsonar.sources=.
+            -Dsonar.host.url=https://sonarcloud.io
+            
+  component-analysis:
+    name: ComponentAnalysis-Node-NPMAudit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the Code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js 16
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+
+      - name: Install the Libraries or Node Modules
+        run: npm install
+
+      - name: Perform Node.js Audit and Output to Json file
+        run: |
+          npm audit --json >> node-audit-results.json
+          if [ $? -eq 0 ]; then
+            echo "npm audit completed successfully"
+          else
+            echo "npm audit failed with exit code $?"
+          fi
+        continue-on-error: true
+
+      - name: List the files available
+        run: ls
+      
+      - name: Upload the Output as an artifact
+        uses: actions/upload-artifact@v3.1.1
+        with:
+          name: NodeAudit Output
+          path: node-audit-results.json
+        if: always()
+
+  oast-frontend-retirejs:
+    name: SAST-Frontend-Job-NodeJS-RetireJS
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the Code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js 16
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+      
+      - name: Install the Libraries or Node Modules
+        run: npm install
+
+      - name: Run RetireJS using docker image
+        run: docker run --rm -v $(pwd):/src -w /src hysnsec/retire --outputformat json --outputpath retirejs-report.json --severity high
+        continue-on-error: true
+
+      - name: List the files available
+        run: ls
+
+      - name: Upload the Output as an artifact
+        uses: actions/upload-artifact@v3.1.1
+        with:
+          name: RetireJS Output
+          path: retirejs-report.json
+        if: always()
+
+  build-container:
+    name: Build Simple React App Container
+    needs: [sonarcloud-scan-job,component-analysis, oast-frontend-retirejs]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the Code
+        uses: actions/checkout@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Build and push
+        uses: docker/build-push-action@v4
+        with:
+          push: true
+          tags: nishanthkp/simple-reactapp-track3:latest
